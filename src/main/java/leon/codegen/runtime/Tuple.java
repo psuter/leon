@@ -2,7 +2,7 @@ package leon.codegen.runtime;
 
 import java.util.Arrays;
 
-public final class Tuple {
+public final class Tuple implements Comparable<Tuple> {
   private final Object[] elements;
 
   // You may think that using varargs here would show less of the internals,
@@ -33,5 +33,21 @@ public final class Tuple {
         if(other.get(i) != this.get(i)) return false;
     }
     return true; 
+  }
+
+  @Override @SuppressWarnings("unchecked")
+  public int compareTo(Tuple other) {
+    int arityDiff = getArity() - other.getArity();
+    if(arityDiff != 0) {
+        return arityDiff;
+    }
+    for(int i = 0; i < getArity(); i++) {
+        Comparable<Object> ce = (Comparable<Object>)get(i);
+        int elemComp = ce.compareTo(other.get(i));
+        if(elemComp != 0) {
+          return elemComp;
+        }
+    }
+    return 0;
   }
 }
