@@ -22,15 +22,45 @@ object DataGen {
   private val boolStream : Stream[Expr] =
     Stream.cons(BooleanLiteral(true), Stream.cons(BooleanLiteral(false), Stream.empty))
 
+  class VectorizedStream[T](initial : Stream[T]) {
+    def streamHeadIndex : Int = indexed.size
+    var stream  : Stream[T] = initial
+    var indexed : Vector[T] = Vector.empty
+
+    def apply(index : Int) : T = {
+      if(index < streamHeadIndex) {
+        indexed(index)
+      } else {
+        if(stream.isEmpty) {
+          throw new IndexOutOfBoundsException("Can't access VectorizedStream at : " + index)
+        }
+        val diff = index - streamHeadIndex // diff >= 0
+        indexed ++= stream.take(diff + 1)
+        stream = stream.drop(diff + 1)
+        apply(index) // this will either go to the indexed case, or throw the exception.
+      }
+    }
+  }
+  private def getVectorizedStream[T](stream : Stream[T]) : VectorizedStream[T] = new VectorizedStream(stream)
+
   private def intStream : Stream[Expr] = Stream.cons(IntLiteral(0), intStream0(1))
   private def intStream0(n : Int) : Stream[Expr] = Stream.cons(IntLiteral(n), intStream0(if(n > 0) -n else -(n-1)))
 
-  private def natStream : Stream[Expr] = natStream0(0)
+  def natStream : Stream[Expr] = natStream0(0)
   private def natStream0(n : Int) : Stream[Expr] = Stream.cons(IntLiteral(n), natStream0(n+1))
 
-  // TODO can we cache something, maybe? It seems like every type should correspond to a unique stream?
-  // We should make sure the cache depends on the bounds (i.e. is not reused for different bounds.)
-  def generate(tpe : TypeTree, bounds : Map[TypeTree,Seq[Expr]] = defaultBounds) : Stream[Expr] = bounds.get(tpe).map(_.toStream).getOrElse {
+  private val streamCache : MutableMap[TypeTree,Stream[Expr]] = MutableMap.empty
+
+  def generate(tpe : TypeTree, bounds : Map[TypeTree,Seq[Expr]] = defaultBounds) : Stream[Expr] = {
+    streamCache.getOrElse(tpe, {
+      val s = generate0(tpe, bounds)
+      streamCache(tpe) = s
+      s
+    })
+  }
+
+  // TODO We should make sure the cache depends on the bounds (i.e. is not reused for different bounds.)
+  private def generate0(tpe : TypeTree, bounds : Map[TypeTree,Seq[Expr]]) : Stream[Expr] = bounds.get(tpe).map(_.toStream).getOrElse {
     tpe match {
       case BooleanType =>
         boolStream
@@ -111,6 +141,7 @@ object DataGen {
   // Takes a series of streams and enumerates their cartesian product.
   private def naryProduct[T](streams : Seq[Stream[T]]) : Stream[List[T]] = {
     val dimensions = streams.size
+    val vectorizedStreams = streams.map(getVectorizedStream)
 
     if(dimensions == 0)
       return Stream.cons(Nil, Stream.empty)
@@ -132,7 +163,8 @@ object DataGen {
       var d = 0
       var continue = true
       var is = indexList
-      var ss = streams.toList
+      //var ss = streams.toList
+      var ss = vectorizedStreams.toList
 
       if(indexList.sum >= bounds.max) {
         allReached = true
